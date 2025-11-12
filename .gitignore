@@ -1,0 +1,2 @@
+# Configuration (to be managed as a submodule)
+/config/settings.py

@@ -1,0 +1,6 @@
+Pillow
+pystray
+python-socketio[client]
+pyperclip
+winotify
+pywin32
