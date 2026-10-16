@@ -87,7 +87,7 @@ class RoutingTests(unittest.TestCase):
 
     def test_invalid_keys_never_fall_back_to_legacy(self):
         legacy = self.connect()
-        for key in ('', 'short', None, 123, [], 'x' * 129, 'spaces are forbidden', 'x' * 16 + '\n'):
+        for key in ('', 'abc', '가나', None, 123, [], 'x' * 129, 'spaces are forbidden', 'x' * 16 + '\n'):
             with self.subTest(key=key):
                 self.assertEqual(self.post(key=key).status_code, 400)
                 client = server.socketio.test_client(server.app, auth={'key': key})
@@ -105,6 +105,15 @@ class RoutingTests(unittest.TestCase):
         self.assertEqual(self.codes(client), [])
         self.assertEqual(self.post(key=KEY_B).status_code, 201)
         self.assertEqual(len(self.codes(client)), 1)
+
+    def test_four_to_128_character_keys_are_accepted(self):
+        for key in ('1234', 'abcd', '가나다라', '\U0001f600' * 4, '가' * 128):
+            with self.subTest(key=key):
+                client = self.connect(key)
+                self.assertTrue(client.is_connected())
+                self.assertEqual(self.post(key=key).status_code, 201)
+                self.assertEqual(self.codes(client)[0]['code'], '200000')
+                client.disconnect()
 
     def test_ready_event_and_capabilities_do_not_disclose_keys(self):
         events = self.connect(KEY_A).get_received()
@@ -129,11 +138,43 @@ class RoutingTests(unittest.TestCase):
                       {'key': KEY_A, 'sender': 'Test', 'message': []}):
             self.assertEqual(self.http.post('/', json=value).status_code, 400)
 
-    def test_nonmatching_sms_is_stored_but_not_emitted(self):
+    def test_nonmatching_sms_is_not_stored_or_emitted(self):
+        keyed, legacy = self.connect(KEY_A), self.connect()
+        for extra in ({'key': KEY_A}, {}):
+            response = self.http.post('/', json={'sender': 'Test', 'message': 'Other 200000', **extra})
+            self.assertEqual(response.status_code, 201)
+        self.assertEqual(self.codes(keyed), [])
+        self.assertEqual(self.codes(legacy), [])
+        with closing(sqlite3.connect(server.DATABASE)) as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM messages').fetchone()[0], 0)
+        self.assertNotIn(b'Other 200000', Path(server.DATABASE).read_bytes())
+
+    def test_no_filters_discards_sms(self):
+        with closing(sqlite3.connect(server.DATABASE)) as db:
+            db.execute('DELETE FROM filters')
+            db.commit()
+        self.assertEqual(self.post(key=KEY_A).status_code, 201)
+        with closing(sqlite3.connect(server.DATABASE)) as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM messages').fetchone()[0], 0)
+
+    def test_matching_sender_is_stored_and_emitted(self):
+        with closing(sqlite3.connect(server.DATABASE)) as db:
+            db.execute("INSERT INTO filters (filter_type, value) VALUES ('sender', 'Trusted')")
+            db.commit()
         client = self.connect(KEY_A)
-        response = self.http.post('/', json={'sender': 'Test', 'message': 'Other 200000', 'key': KEY_A})
+        response = self.http.post('/', json={'sender': 'Trusted', 'message': 'Other 200000', 'key': KEY_A})
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(self.codes(client)[0]['code'], '200000')
+        with closing(sqlite3.connect(server.DATABASE)) as db:
+            self.assertEqual(db.execute('SELECT body, processed FROM messages').fetchone(), ('Other 200000', 1))
+
+    def test_matching_sms_without_code_is_stored_but_not_emitted(self):
+        client = self.connect(KEY_A)
+        response = self.http.post('/', json={'sender': 'Test', 'message': '[Test] no code', 'key': KEY_A})
         self.assertEqual(response.status_code, 201)
         self.assertEqual(self.codes(client), [])
+        with closing(sqlite3.connect(server.DATABASE)) as db:
+            self.assertEqual(db.execute('SELECT body, processed FROM messages').fetchone(), ('[Test] no code', 0))
 
     def test_dashboard_export_and_mutations_require_admin_credentials(self):
         for path, method in (('/', 'get'), ('/export', 'get'), ('/add_filter', 'post'),
@@ -157,9 +198,14 @@ class ClientOptionsTests(unittest.TestCase):
         self.assertIsNone(parse_options(['--legacy']).key)
 
     def test_missing_invalid_and_conflicting_options(self):
-        for args in ([], ['--'], ['short'], ['--legacy', KEY_A], ['--', 'x' * 129], ['--', 'a' * 16 + '\n']):
+        for args in ([], ['--'], ['abc'], ['가나'], ['--legacy', KEY_A], ['--', 'x' * 129], ['--', 'a' * 16 + '\n']):
             with self.subTest(args=args), self.assertRaises(ValueError):
                 parse_options(args)
+
+    def test_four_to_128_character_keys_are_accepted(self):
+        for key in ('1234', 'abcd', '가나다라', '\U0001f600' * 4, '가' * 128):
+            with self.subTest(key=key):
+                self.assertEqual(parse_options(['--', key]).key, key)
 
     def test_keyed_mode_never_uses_http_fallback(self):
         urls = ['https://example.com', 'http://127.0.0.1:8312', '']

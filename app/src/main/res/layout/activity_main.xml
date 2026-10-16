@@ -17,7 +17,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:hint="서버 주소 (https://...)"
+            android:hint="서버 주소 (예: sms.netras.org)"
             android:inputType="textUri"
             android:singleLine="true" />
         <EditText
@@ -31,13 +31,21 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="설정은 자동 저장됩니다. 연결키는 공백 없이 16~128바이트를 입력하세요. 같은 키를 사용하는 PC가 함께 수신합니다." />
+            android:text="설정은 자동 저장됩니다. 연결키는 숫자나 문자를 사용해 공백 없이 4~128자로 정하세요. PC에도 똑같이 입력하면 문자를 받을 수 있습니다." />
         <androidx.appcompat.widget.SwitchCompat
-            android:id="@+id/service_switch"
+            android:id="@+id/background_switch"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="문자 전달 사용" />
+            android:text="백그라운드 실행 허용" />
+        <TextView
+            android:id="@+id/background_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="서버 주소와 연결키를 설정하고 문자 권한을 허용하면 자동 전달됩니다. 이 스위치는 배터리 최적화 제외 상태를 표시하며, 끄려면 시스템 설정에서 변경하세요." />
         <Button
             android:id="@+id/test_button"
             android:layout_width="match_parent"

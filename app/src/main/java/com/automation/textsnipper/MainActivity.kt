@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
@@ -27,11 +26,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
 
     private val PERMISSIONS_REQUEST_CODE = 100
-    private val REQUIRED_PERMISSIONS = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        arrayOf(Manifest.permission.RECEIVE_SMS, Manifest.permission.POST_NOTIFICATIONS)
-    } else {
-        arrayOf(Manifest.permission.RECEIVE_SMS)
-    }
+    private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.RECEIVE_SMS)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -40,10 +35,11 @@ class MainActivity : AppCompatActivity() {
 
         val sharedPreferences = getSharedPreferences("settings", Context.MODE_PRIVATE)
 
-        // 저장된 호스트 주소 및 스위치 상태 불러오기
+        // 저장된 호스트 주소 및 연결키 불러오기
         binding.hostAddressInput.setText(sharedPreferences.getString("host_address", ""))
         binding.pairingKeyInput.setText(sharedPreferences.getString("pairing_key", ""))
-        binding.serviceSwitch.isChecked = sharedPreferences.getBoolean("service_enabled", false)
+        enableSmsReceiver()
+        updateBackgroundStatus()
 
         // 호스트 주소 자동 저장
         binding.hostAddressInput.addTextChangedListener(object : TextWatcher {
@@ -65,20 +61,18 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
-        // 스위치 리스너
-        binding.serviceSwitch.setOnCheckedChangeListener { _, isChecked ->
-            if (isChecked && !SmsApi.isValidKey(sharedPreferences.getString("pairing_key", "") ?: "")) {
-                binding.serviceSwitch.isChecked = false
-                Toast.makeText(this, "먼저 연결키를 입력하세요. 공백 없이 16~128바이트가 필요합니다.", Toast.LENGTH_LONG).show()
+        binding.backgroundSwitch.setOnCheckedChangeListener { _, isChecked ->
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (isChecked == powerManager.isIgnoringBatteryOptimizations(packageName)) {
                 return@setOnCheckedChangeListener
             }
-            with(sharedPreferences.edit()) {
-                putBoolean("service_enabled", isChecked)
-                apply()
+            if (isChecked) {
+                startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    Uri.parse("package:$packageName")))
+            } else {
+                startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
             }
-            toggleSmsReceiver(isChecked)
-            val status = if (isChecked) "started" else "stopped"
-            Toast.makeText(this, "Background service $status", Toast.LENGTH_SHORT).show()
+            updateBackgroundStatus()
         }
 
         // 테스트 버튼 클릭 리스너
@@ -93,15 +87,18 @@ class MainActivity : AppCompatActivity() {
 
         // 권한 확인 및 요청
         checkAndRequestPermissions()
-        // 배터리 최적화 예외 요청
-        requestIgnoreBatteryOptimizations()
     }
 
-    private fun toggleSmsReceiver(enable: Boolean) {
+    override fun onResume() {
+        super.onResume()
+        updateBackgroundStatus()
+    }
+
+    private fun enableSmsReceiver() {
         val receiver = ComponentName(this, SmsBroadcastReceiver::class.java)
         packageManager.setComponentEnabledSetting(
             receiver,
-            if (enable) PackageManager.COMPONENT_ENABLED_STATE_ENABLED else PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+            PackageManager.COMPONENT_ENABLED_STATE_DEFAULT,
             PackageManager.DONT_KILL_APP
         )
     }
@@ -114,20 +111,19 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread { Toast.makeText(this@MainActivity, "Test successful", Toast.LENGTH_SHORT).show() }
             } catch (e: Exception) {
                 Log.e("MainActivity", "SMS test failed: ${e.javaClass.simpleName}")
-                runOnUiThread { Toast.makeText(this@MainActivity, "연결키, HTTPS 주소, 서버 버전을 확인하세요.", Toast.LENGTH_LONG).show() }
+                runOnUiThread { Toast.makeText(this@MainActivity, "연결키, 서버 주소, 서버 버전을 확인하세요.", Toast.LENGTH_LONG).show() }
             }
         }
     }
 
-    fun requestIgnoreBatteryOptimizations() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-            val packageName = packageName
-            if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
-                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-                intent.data = Uri.parse("package:$packageName")
-                startActivity(intent)
-            }
+    private fun updateBackgroundStatus() {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val allowed = powerManager.isIgnoringBatteryOptimizations(packageName)
+        binding.backgroundSwitch.isChecked = allowed
+        binding.backgroundStatus.text = if (allowed) {
+            "허용됨 · 배터리 최적화 제외 상태입니다."
+        } else {
+            "제한됨 · 스위치를 켜서 배터리 최적화 제외를 허용하세요."
         }
     }
 

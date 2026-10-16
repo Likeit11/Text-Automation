@@ -25,9 +25,9 @@ def delivery_room(data):
             raise ValueError('A pairing key is required')
         return 'legacy'
     key = data['key']
-    if (not isinstance(key, str) or not 16 <= len(key.encode('utf-8')) <= 128
+    if (not isinstance(key, str) or not 4 <= len(key) <= 128
             or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in key)):
-        raise ValueError('Key must be 16-128 UTF-8 bytes without spaces or control characters')
+        raise ValueError('Key must be 4-128 characters without spaces or control characters')
     return 'key:' + hashlib.sha256(key.encode('utf-8')).hexdigest()
 
 
@@ -104,10 +104,6 @@ def index():
         if not isinstance(sender, str) or not sender or not isinstance(message_body, str) or not message_body:
             return jsonify({'error': 'Missing sender or message'}), 400
 
-        cursor = db.execute('INSERT INTO messages (sender, body) VALUES (?, ?)', (sender, message_body))
-        new_message_id = cursor.lastrowid
-        db.commit()
-
         filters = db.execute('SELECT * FROM filters').fetchall()
         match_found = False
         for f in filters:
@@ -117,19 +113,25 @@ def index():
                 matched_filter_info = f['value']
                 break
         
-        if match_found:
-            auth_code_match = re.search(r'(\d{6})', message_body)
-            if auth_code_match:
-                auth_code = auth_code_match.group(1)
-                socketio.emit('new_code', {
-                    'code': auth_code,
-                    'filter_type': f['filter_type'],
-                    'filter_value': f['value'],
-                    'routing': 'legacy' if room == 'legacy' else 'keyed'
-                }, to=room)
-                db.execute('''UPDATE messages SET processed = 1, matched_filter = ?, extracted_code = ? WHERE id = ?''', 
-                           (matched_filter_info, auth_code, new_message_id))
-                db.commit()
+        if not match_found:
+            return jsonify({'status': 'success'}), 201
+
+        cursor = db.execute('INSERT INTO messages (sender, body) VALUES (?, ?)', (sender, message_body))
+        new_message_id = cursor.lastrowid
+        db.commit()
+
+        auth_code_match = re.search(r'(\d{6})', message_body)
+        if auth_code_match:
+            auth_code = auth_code_match.group(1)
+            socketio.emit('new_code', {
+                'code': auth_code,
+                'filter_type': f['filter_type'],
+                'filter_value': f['value'],
+                'routing': 'legacy' if room == 'legacy' else 'keyed'
+            }, to=room)
+            db.execute('''UPDATE messages SET processed = 1, matched_filter = ?, extracted_code = ? WHERE id = ?''',
+                       (matched_filter_info, auth_code, new_message_id))
+            db.commit()
 
         return jsonify({'status': 'success'}), 201
 

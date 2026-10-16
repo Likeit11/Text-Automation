@@ -106,8 +106,6 @@ class App:
         def on_routing_ready(data):
             self.routing_ready = (isinstance(data, dict) and data.get('version') == 1
                                   and data.get('mode') == 'keyed')
-            if self.routing_ready:
-                self.log("연결키 전용 수신이 준비되었습니다. 같은 키의 휴대폰 문자만 수신합니다.")
 
         @self.sio.event
         def disconnect(reason=None):
@@ -117,7 +115,7 @@ class App:
         @self.sio.on('new_code')
         def on_new_code(data):
             if not accepts_code(data, self.key, self.routing_ready):
-                self.log("수신 분리가 확인되지 않아 코드를 무시했습니다. 서버 업데이트를 확인하세요.")
+                self.log("Code ignored: routing is not confirmed. Check the server version.")
                 return
             auth_code = data.get('code')
             filter_value = data.get('filter_value')

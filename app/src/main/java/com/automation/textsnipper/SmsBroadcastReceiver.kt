@@ -14,7 +14,6 @@ open class SmsBroadcastReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == Telephony.Sms.Intents.SMS_RECEIVED_ACTION) {
             val preferences = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
-            if (!preferences.getBoolean("service_enabled", false)) return
             val host = preferences.getString("host_address", "") ?: ""
             val key = preferences.getString("pairing_key", "") ?: ""
             if (host.isEmpty() || !SmsApi.isValidKey(key)) {

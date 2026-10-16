@@ -3,3 +3,17 @@
 /client/config/settings.py
 __pycache__/
 /.venv-tests/
+/.gradle/
+/.idea/
+/.kotlin/
+/local.properties
+/build/
+/app/build/
+/client/build/
+/client/dist/*.exe
+/Server/data/
+/Server/sms_data/
+/Worklog.md
+*.env
+*.jks
+*.keystore

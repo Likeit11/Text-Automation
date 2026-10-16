@@ -39,7 +39,7 @@ class SettingsFragment : Fragment() {
                 sharedPreferences.edit().putString("pairing_key", key).apply()
                 Toast.makeText(requireContext(), "연결키가 저장되었습니다.", Toast.LENGTH_SHORT).show()
             } else {
-                Toast.makeText(requireContext(), "공백·제어문자 없이 UTF-8 기준 16~128바이트를 입력하세요.", Toast.LENGTH_LONG).show()
+                Toast.makeText(requireContext(), "연결키는 공백 없이 4~128자로 입력하세요.", Toast.LENGTH_LONG).show()
             }
         }
 

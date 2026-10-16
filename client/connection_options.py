@@ -16,9 +16,9 @@ def parse_options(argv=None):
     if args.legacy:
         if args.key is not None:
             raise ValueError('Do not combine --legacy with a pairing key.')
-    elif (args.key is None or not 16 <= len(args.key.encode('utf-8')) <= 128
+    elif (args.key is None or not 4 <= len(args.key) <= 128
             or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in args.key)):
-        raise ValueError('연결키는 공백·제어문자 없이 UTF-8 기준 16~128바이트여야 합니다.\n'
+        raise ValueError('연결키는 공백 없이 4~128자로 입력하세요.\n'
                          '사용 예: "프로그램.exe" -- YourPrivateKey_123456\n'
                          '기존 서버 연결: "프로그램.exe" --legacy')
     return args
