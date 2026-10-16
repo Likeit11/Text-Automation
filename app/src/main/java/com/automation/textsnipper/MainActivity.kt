@@ -21,16 +21,10 @@ import com.automation.textsnipper.databinding.ActivityMainBinding
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONObject
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
-    private val client = OkHttpClient()
 
     private val PERMISSIONS_REQUEST_CODE = 100
     private val REQUIRED_PERMISSIONS = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -48,6 +42,7 @@ class MainActivity : AppCompatActivity() {
 
         // 저장된 호스트 주소 및 스위치 상태 불러오기
         binding.hostAddressInput.setText(sharedPreferences.getString("host_address", ""))
+        binding.pairingKeyInput.setText(sharedPreferences.getString("pairing_key", ""))
         binding.serviceSwitch.isChecked = sharedPreferences.getBoolean("service_enabled", false)
 
         // 호스트 주소 자동 저장
@@ -62,8 +57,21 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
+        binding.pairingKeyInput.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                sharedPreferences.edit().putString("pairing_key", s.toString()).apply()
+            }
+        })
+
         // 스위치 리스너
         binding.serviceSwitch.setOnCheckedChangeListener { _, isChecked ->
+            if (isChecked && !SmsApi.isValidKey(sharedPreferences.getString("pairing_key", "") ?: "")) {
+                binding.serviceSwitch.isChecked = false
+                Toast.makeText(this, "먼저 연결키를 입력하세요. 공백 없이 16~128바이트가 필요합니다.", Toast.LENGTH_LONG).show()
+                return@setOnCheckedChangeListener
+            }
             with(sharedPreferences.edit()) {
                 putBoolean("service_enabled", isChecked)
                 apply()
@@ -99,37 +107,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun sendToServer(url: String, sender: String, message: String) {
+        val key = getSharedPreferences("settings", Context.MODE_PRIVATE).getString("pairing_key", "") ?: ""
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val correctedUrl = if (!url.startsWith("http://") && !url.startsWith("https://")) {
-                    "http://$url"
-                } else {
-                    url
-                }
-
-                val json = JSONObject()
-                json.put("sender", sender)
-                json.put("message", message)
-
-                val requestBody = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
-
-                val request = Request.Builder()
-                    .url(correctedUrl)
-                    .post(requestBody)
-                    .build()
-
-                client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        Log.e("MainActivity", "Server error: ${response.code} ${response.message}")
-                        runOnUiThread { Toast.makeText(this@MainActivity, "Test failed: ${response.code}", Toast.LENGTH_SHORT).show() }
-                    } else {
-                        Log.d("MainActivity", "Server response: ${response.body?.string()}")
-                        runOnUiThread { Toast.makeText(this@MainActivity, "Test successful", Toast.LENGTH_SHORT).show() }
-                    }
-                }
+                SmsApi.send(url, key, sender, message)
+                runOnUiThread { Toast.makeText(this@MainActivity, "Test successful", Toast.LENGTH_SHORT).show() }
             } catch (e: Exception) {
-                Log.e("MainActivity", "Error sending to server: ${e.message}")
-                runOnUiThread { Toast.makeText(this@MainActivity, "Test failed: ${e.message}", Toast.LENGTH_SHORT).show() }
+                Log.e("MainActivity", "SMS test failed: ${e.javaClass.simpleName}")
+                runOnUiThread { Toast.makeText(this@MainActivity, "연결키, HTTPS 주소, 서버 버전을 확인하세요.", Toast.LENGTH_LONG).show() }
             }
         }
     }

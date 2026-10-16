@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="문자 인증번호 연결 설정"
+            android:textSize="22sp" />
+        <EditText
+            android:id="@+id/host_address_input"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:hint="서버 주소 (https://...)"
+            android:inputType="textUri"
+            android:singleLine="true" />
+        <EditText
+            android:id="@+id/pairing_key_input"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="연결키 (PC와 동일하게 입력)"
+            android:inputType="textPassword"
+            android:singleLine="true"
+            android:importantForAutofill="no" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="설정은 자동 저장됩니다. 연결키는 공백 없이 16~128바이트를 입력하세요. 같은 키를 사용하는 PC가 함께 수신합니다." />
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/service_switch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="문자 전달 사용" />
+        <Button
+            android:id="@+id/test_button"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="연결 테스트" />
+    </LinearLayout>
+</ScrollView>

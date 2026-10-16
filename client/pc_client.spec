@@ -3,7 +3,7 @@
 
 a = Analysis(
     ['pc_client.py'],
-    pathex=['C:\\Users\\Home\\Desktop\\Gemini-cli\\TextAutomation'],
+    pathex=[],
     binaries=[],
     datas=[('app.ico', '.')],
     hiddenimports=[],

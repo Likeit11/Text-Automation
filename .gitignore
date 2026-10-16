@@ -1,2 +1,5 @@
 # Configuration (to be managed as a submodule)
 /config/settings.py
+/client/config/settings.py
+__pycache__/
+/.venv-tests/

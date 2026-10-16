@@ -6,6 +6,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
 import com.automation.textsnipper.databinding.FragmentSettingsBinding
@@ -31,6 +32,16 @@ class SettingsFragment : Fragment() {
 
         // 저장된 호스트 주소 표시
         binding.hostAddress.text = sharedPreferences.getString("host_address", "Click to set address")
+        binding.pairingKeyInput.setText(sharedPreferences.getString("pairing_key", ""))
+        binding.savePairingKey.setOnClickListener {
+            val key = binding.pairingKeyInput.text.toString()
+            if (SmsApi.isValidKey(key)) {
+                sharedPreferences.edit().putString("pairing_key", key).apply()
+                Toast.makeText(requireContext(), "연결키가 저장되었습니다.", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(requireContext(), "공백·제어문자 없이 UTF-8 기준 16~128바이트를 입력하세요.", Toast.LENGTH_LONG).show()
+            }
+        }
 
         // 호스트 주소 클릭 리스너
         binding.hostAddress.setOnClickListener {

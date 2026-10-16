@@ -1,20 +1,51 @@
 import sqlite3
 import re
 import os
+import hashlib
+import hmac
 import click
 import pandas as pd
 import io
 from flask import Flask, request, jsonify, render_template, g, redirect, url_for, send_file
-from flask_socketio import SocketIO, emit
+from flask_socketio import SocketIO, emit, join_room
 import math
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret!'
-socketio = SocketIO(app, async_mode='eventlet')
+socketio = SocketIO(app, async_mode=os.environ.get('SMS_ASYNC_MODE', 'eventlet'))
 
 DATA_DIR = 'data'
 DATABASE = os.path.join(DATA_DIR, 'database.db')
 PER_PAGE = 20
+
+
+def delivery_room(data):
+    if 'key' not in data:
+        if os.environ.get('SMS_ALLOW_LEGACY', '1') != '1':
+            raise ValueError('A pairing key is required')
+        return 'legacy'
+    key = data['key']
+    if (not isinstance(key, str) or not 16 <= len(key.encode('utf-8')) <= 128
+            or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in key)):
+        raise ValueError('Key must be 16-128 UTF-8 bytes without spaces or control characters')
+    return 'key:' + hashlib.sha256(key.encode('utf-8')).hexdigest()
+
+
+@app.before_request
+def protect_dashboard():
+    if request.endpoint not in {'index', 'add_filter', 'delete_filter', 'delete_messages', 'export_excel'}:
+        return
+    if request.endpoint == 'index' and request.method == 'POST':
+        return
+    token = os.environ.get('SMS_ADMIN_TOKEN', '')
+    if not token:
+        return jsonify({'error': 'Set SMS_ADMIN_TOKEN to enable the admin dashboard'}), 503
+    auth = request.authorization
+    if (not auth or auth.type != 'basic' or auth.username != 'admin'
+            or not hmac.compare_digest((auth.password or '').encode('utf-8'), token.encode('utf-8'))):
+        return jsonify({'error': 'Admin authentication required'}), 401, {
+            'WWW-Authenticate': 'Basic realm="SMS Admin"'
+        }
 
 def get_db():
     db = getattr(g, '_database', None)
@@ -49,6 +80,11 @@ def init_db_if_needed():
             init_db()
             print("Initialized the database.")
 
+
+@app.route('/capabilities')
+def capabilities():
+    return jsonify({'key_routing_version': 1})
+
 @app.route('/', methods=['GET', 'POST'])
 def index():
     init_db_if_needed()
@@ -56,10 +92,16 @@ def index():
 
     if request.method == 'POST':
         # This part handles the SMS submission from the Android app
-        data = request.json
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify({'error': 'Expected a JSON object'}), 400
+        try:
+            room = delivery_room(data)
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
         sender = data.get('sender')
         message_body = data.get('message')
-        if not sender or not message_body:
+        if not isinstance(sender, str) or not sender or not isinstance(message_body, str) or not message_body:
             return jsonify({'error': 'Missing sender or message'}), 400
 
         cursor = db.execute('INSERT INTO messages (sender, body) VALUES (?, ?)', (sender, message_body))
@@ -79,12 +121,12 @@ def index():
             auth_code_match = re.search(r'(\d{6})', message_body)
             if auth_code_match:
                 auth_code = auth_code_match.group(1)
-                print(f"Matching code found: {auth_code}. Emitting to clients.")
                 socketio.emit('new_code', {
                     'code': auth_code,
                     'filter_type': f['filter_type'],
-                    'filter_value': f['value']
-                })
+                    'filter_value': f['value'],
+                    'routing': 'legacy' if room == 'legacy' else 'keyed'
+                }, to=room)
                 db.execute('''UPDATE messages SET processed = 1, matched_filter = ?, extracted_code = ? WHERE id = ?''', 
                            (matched_filter_info, auth_code, new_message_id))
                 db.commit()
@@ -173,11 +215,19 @@ def export_excel():
                      as_attachment=True, download_name='messages.xlsx')
 
 @socketio.on('connect')
-def handle_connect():
+def handle_connect(auth=None):
+    if auth is not None and not isinstance(auth, dict):
+        return False
+    try:
+        room = delivery_room(auth if auth is not None else {})
+    except ValueError:
+        return False
+    join_room(room)
+    emit('routing_ready', {'version': 1, 'mode': 'legacy' if room == 'legacy' else 'keyed'})
     print('PC client connected')
 
 @socketio.on('disconnect')
-def handle_disconnect():
+def handle_disconnect(reason=None):
     print('PC client disconnected')
 
 if __name__ == '__main__':
@@ -188,4 +238,4 @@ if __name__ == '__main__':
     os.makedirs(DATA_DIR, exist_ok=True)
     init_db_if_needed()
     print("Starting WebSocket server...")
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+    socketio.run(app, host='0.0.0.0', port=5000, debug=False)

@@ -1,5 +1,6 @@
 import tkinter as tk
-from tkinter import scrolledtext
+from tkinter import scrolledtext, messagebox
+from connection_options import parse_options, connection_urls, accepts_code
 import time
 import threading
 from PIL import Image, ImageDraw
@@ -42,8 +43,11 @@ class SingleInstance:
         return self.last_error == ERROR_ALREADY_EXISTS
 
 class App:
-    def __init__(self, root):
+    def __init__(self, root, key=None):
         self.root = root
+        self.key = key
+        self.routing_ready = False
+        self.urls = connection_urls(URLS, key)
         self.root.title("쇼핑몰 인증번호")
         self.root.iconbitmap(resource_path('app.ico'))
         self.root.geometry("640x360")
@@ -93,14 +97,28 @@ class App:
                 self.log("Successfully connected to the fallback IP address.")
             else:
                 self.log(f"Successfully connected to {connected_url}")
-            self.log("Listening for authentication codes.")
+            if self.key is None:
+                self.log("Legacy mode: listening for unkeyed authentication codes.")
+            else:
+                self.log("Connected. A routing_ready confirmation is required to receive codes.")
+
+        @self.sio.on('routing_ready')
+        def on_routing_ready(data):
+            self.routing_ready = (isinstance(data, dict) and data.get('version') == 1
+                                  and data.get('mode') == 'keyed')
+            if self.routing_ready:
+                self.log("연결키 전용 수신이 준비되었습니다. 같은 키의 휴대폰 문자만 수신합니다.")
 
         @self.sio.event
-        def disconnect():
+        def disconnect(reason=None):
+            self.routing_ready = False
             self.log("Disconnected from the server. Attempting to reconnect...")
 
         @self.sio.on('new_code')
         def on_new_code(data):
+            if not accepts_code(data, self.key, self.routing_ready):
+                self.log("수신 분리가 확인되지 않아 코드를 무시했습니다. 서버 업데이트를 확인하세요.")
+                return
             auth_code = data.get('code')
             filter_value = data.get('filter_value')
             if not auth_code:
@@ -119,7 +137,7 @@ class App:
     def socket_io_main_loop(self):
         self.log("Client starting...")
         while not self.stop_event.is_set():
-            for url in URLS:
+            for url in self.urls:
                 if self.stop_event.is_set(): break
                 try:
                     # 2. IP Obfuscation
@@ -128,13 +146,15 @@ class App:
                     else:
                         self.log(f"Attempting to connect to {url}...")
                     
-                    self.sio.connect(url, wait_timeout=10)
+                    self.routing_ready = False
+                    auth = {'key': self.key} if self.key is not None else None
+                    self.sio.connect(url, auth=auth, wait_timeout=10)
                     self.sio.wait() # Blocks until disconnected
                 except socketio.exceptions.ConnectionError:
                     self.log("Failed to connect to the current address.")
                     continue
-                except Exception as e:
-                    self.log(f"An unexpected error occurred: {e}")
+                except Exception:
+                    self.log("An unexpected connection error occurred.")
                     time.sleep(10)
                     continue
             if not self.sio.connected and not self.stop_event.is_set():
@@ -176,6 +196,17 @@ class App:
         self.root.destroy()
 
 if __name__ == "__main__":
+    try:
+        options = parse_options()
+        if not connection_urls(URLS, options.key):
+            raise ValueError('연결키 모드에는 HTTPS 서버 주소가 필요합니다. config/settings.py를 확인하세요.')
+    except ValueError as exc:
+        error_root = tk.Tk()
+        error_root.withdraw()
+        messagebox.showerror('실행 설정 확인', str(exc))
+        error_root.destroy()
+        sys.exit(1)
+
     instance_lock = SingleInstance("Global\SMSClientAppMutex")
     if instance_lock.already_running():
         import tkinter as tk
@@ -187,7 +218,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     main_root = tk.Tk()
-    app = App(main_root)
+    app = App(main_root, options.key)
     
     # Start with the window visible and focused
     app.show_window()

@@ -8,64 +8,31 @@ import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONObject
 
-class SmsBroadcastReceiver : BroadcastReceiver() {
-
-    private val client = OkHttpClient()
+open class SmsBroadcastReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == Telephony.Sms.Intents.SMS_RECEIVED_ACTION) {
-            val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
-            for (smsMessage in messages) {
-                val messageBody = smsMessage.messageBody
-                val sender = smsMessage.originatingAddress
-
-                Log.d("SmsReceiver", "From: $sender, Message: $messageBody")
-
-                val sharedPreferences = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
-                val hostAddress = sharedPreferences.getString("host_address", null)
-
-                if (hostAddress != null && hostAddress.isNotEmpty()) {
-                    sendToServer(hostAddress, sender, messageBody)
-                }
+            val preferences = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+            if (!preferences.getBoolean("service_enabled", false)) return
+            val host = preferences.getString("host_address", "") ?: ""
+            val key = preferences.getString("pairing_key", "") ?: ""
+            if (host.isEmpty() || !SmsApi.isValidKey(key)) {
+                Log.w("SmsReceiver", "SMS forwarding skipped: HTTPS host and valid pairing key required")
+                return
             }
-        }
-    }
-
-    private fun sendToServer(url: String, sender: String?, message: String) {
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val correctedUrl = if (!url.startsWith("http://") && !url.startsWith("https://")) {
-                    "http://$url"
-                } else {
-                    url
+            val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
+            if (messages.isEmpty()) return
+            val pending = goAsync()
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    SmsApi.send(host, key, messages.first().originatingAddress,
+                        messages.joinToString("") { it.messageBody })
+                } catch (e: Exception) {
+                    Log.e("SmsReceiver", "SMS forwarding failed: ${e.javaClass.simpleName}")
+                } finally {
+                    pending.finish()
                 }
-
-                val json = JSONObject()
-                json.put("sender", sender)
-                json.put("message", message)
-
-                val requestBody = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
-
-                val request = Request.Builder()
-                    .url(correctedUrl)
-                    .post(requestBody)
-                    .build()
-
-                client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        Log.e("SmsReceiver", "Server error: ${response.code} ${response.message}")
-                    } else {
-                        Log.d("SmsReceiver", "Server response: ${response.body?.string()}")
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("SmsReceiver", "Error sending to server: ${e.message}")
             }
         }
     }
