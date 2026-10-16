@@ -181,6 +181,10 @@ def handle_disconnect():
     print('PC client disconnected')
 
 if __name__ == '__main__':
+    if os.environ.get('SMS_REQUIRE_EXISTING_DB') == '1' and (
+        not os.path.ismount(DATA_DIR) or not os.path.isfile(DATABASE)
+    ):
+        raise RuntimeError('SMS database mount or database.db is missing')
     os.makedirs(DATA_DIR, exist_ok=True)
     init_db_if_needed()
     print("Starting WebSocket server...")
