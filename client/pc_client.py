@@ -58,6 +58,13 @@ class App:
         # Theme: White background, black text
         self.log_area = scrolledtext.ScrolledText(root, wrap=tk.WORD, bg="white", fg="black", relief=tk.FLAT)
         self.log_area.pack(expand=True, fill='both', padx=5, pady=5)
+        self.log_area.mark_set('input_start', 'end-1c')
+        self.log_area.mark_gravity('input_start', tk.LEFT)
+        self.log_area.bind('<Return>', self.submit_model)
+        self.log_area.bind('<KeyPress>', self.protect_log)
+        self.log_area.bind('<<Paste>>', self.paste_model)
+        self.log_area.bind('<<Cut>>', self.protect_cut)
+        self.log_area.focus_set()
 
         self.sio = socketio.Client()
         self.setup_sio_events()
@@ -83,10 +90,61 @@ class App:
         return match is not None
 
     def log(self, message):
+        if self.stop_event.is_set():
+            return
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         full_message = f"[{timestamp}] {message}\n"
-        self.root.after(0, lambda: self.log_area.insert(tk.END, full_message))
-        self.root.after(0, lambda: self.log_area.see(tk.END)) # Auto-scroll
+        self.root.after(0, lambda: self.append_log(full_message))
+
+    def append_log(self, message):
+        self.log_area.mark_gravity('input_start', tk.RIGHT)
+        self.log_area.insert('input_start', message)
+        self.log_area.mark_gravity('input_start', tk.LEFT)
+        self.log_area.see(tk.END)
+
+    def protect_cut(self, event=None):
+        if self.log_area.tag_ranges(tk.SEL) and self.log_area.compare('sel.first', '<', 'input_start'):
+            return 'break'
+
+    def protect_log(self, event):
+        if not event.char and event.keysym not in ('BackSpace', 'Delete'):
+            return
+        if event.state & 4 and event.keysym.lower() not in ('backspace', 'delete', 'h', 'd', 'k'):
+            return
+        if self.protect_cut() == 'break':
+            self.log_area.tag_remove(tk.SEL, '1.0', tk.END)
+        if self.log_area.compare(tk.INSERT, '<', 'input_start'):
+            self.log_area.mark_set(tk.INSERT, 'end-1c')
+        if event.keysym == 'BackSpace' and self.log_area.compare(tk.INSERT, '<=', 'input_start'):
+            return 'break'
+        if event.state & 4 and event.keysym in ('BackSpace', 'h'):
+            start = self.log_area.index('insert -1c wordstart')
+            if self.log_area.compare(start, '<', 'input_start'):
+                start = self.log_area.index('input_start')
+            self.log_area.delete(start, tk.INSERT)
+            return 'break'
+
+    def paste_model(self, event=None):
+        try:
+            text = self.root.clipboard_get().replace('\r', ' ').replace('\n', ' ')
+        except tk.TclError:
+            return 'break'
+        if self.log_area.tag_ranges(tk.SEL):
+            if self.protect_cut() != 'break':
+                self.log_area.delete('sel.first', 'sel.last')
+            self.log_area.tag_remove(tk.SEL, '1.0', tk.END)
+        if self.log_area.compare(tk.INSERT, '<', 'input_start'):
+            self.log_area.mark_set(tk.INSERT, 'end-1c')
+        self.log_area.insert(tk.INSERT, text)
+        return 'break'
+
+    def submit_model(self, event=None):
+        model = self.log_area.get('input_start', 'end-1c').strip()
+        if model:
+            self.log_area.delete('input_start', 'end-1c')
+            self.append_log(f'> {model}\n')
+            self.send_product_search(model)
+        return 'break'
 
     def setup_sio_events(self):
         @self.sio.event
@@ -110,6 +168,8 @@ class App:
         @self.sio.event
         def disconnect(reason=None):
             self.routing_ready = False
+            if self.stop_event.is_set():
+                return
             self.log("Disconnected from the server. Attempting to reconnect...")
 
         @self.sio.on('new_code')
@@ -131,6 +191,26 @@ class App:
                 toast.show()
             except Exception as e:
                 self.log(f"Notification failed: {e}")
+
+    def send_product_search(self, model):
+        if not model or len(model) > 200 or any(ord(c) < 32 or ord(c) == 127 for c in model):
+            messagebox.showerror("모델명 확인", "상품 모델명을 1~200자로 입력하세요.")
+            return
+        if not self.key or not self.routing_ready or not self.sio.connected:
+            self.log("Search unavailable: connect in pairing-key mode first.")
+            return
+
+        def send():
+            try:
+                result = self.sio.call('open_product_search', {'model': model}, timeout=10)
+                if isinstance(result, dict) and result.get('status') == 'sent':
+                    self.log(f"Search sent to {result['phones']} connected phone(s).")
+                else:
+                    self.log(result.get('error', 'Search failed.') if isinstance(result, dict) else 'Search failed.')
+            except (socketio.exceptions.SocketIOError, ValueError):
+                self.log("Search failed: check the server and phone connection.")
+
+        threading.Thread(target=send, daemon=True).start()
 
     def socket_io_main_loop(self):
         self.log("Client starting...")

@@ -1,4 +1,4 @@
-# Configuration (to be managed as a submodule)
+# Local configuration
 /config/settings.py
 /client/config/settings.py
 __pycache__/
@@ -11,6 +11,7 @@ __pycache__/
 /app/build/
 /client/build/
 /client/dist/*.exe
+/client/dist/*.zip
 /Server/data/
 /Server/sms_data/
 /Worklog.md

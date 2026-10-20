@@ -47,6 +47,19 @@
             android:layout_height="wrap_content"
             android:text="서버 주소와 연결키를 설정하고 문자 권한을 허용하면 자동 전달됩니다. 이 스위치는 배터리 최적화 제외 상태를 표시하며, 끄려면 시스템 설정에서 변경하세요." />
         <Button
+            android:id="@+id/allow_auto_open"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="휴대폰 자동 열기 권한 설정" />
+        <TextView
+            android:id="@+id/search_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="PC에서 모델명을 보내면 9tems 검색 결과를 엽니다. 다른 앱 위에 표시 권한이 필요합니다. 화면이 켜져 있고 잠금이 풀려 있으면 바로 열고, 잠겨 있거나 꺼져 있을 때만 검색 알림을 표시합니다." />
+        <Button
             android:id="@+id/test_button"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

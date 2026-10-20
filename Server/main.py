@@ -9,6 +9,8 @@ import io
 from flask import Flask, request, jsonify, render_template, g, redirect, url_for, send_file
 from flask_socketio import SocketIO, emit, join_room
 import math
+from urllib.parse import urlencode
+from flask import session
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret!'
@@ -83,7 +85,7 @@ def init_db_if_needed():
 
 @app.route('/capabilities')
 def capabilities():
-    return jsonify({'key_routing_version': 1})
+    return jsonify({'key_routing_version': 1, 'product_search_version': 1})
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
@@ -224,9 +226,34 @@ def handle_connect(auth=None):
         room = delivery_room(auth if auth is not None else {})
     except ValueError:
         return False
-    join_room(room)
-    emit('routing_ready', {'version': 1, 'mode': 'legacy' if room == 'legacy' else 'keyed'})
+    role = auth.get('role', 'pc') if auth is not None else 'pc'
+    if role not in ('pc', 'phone') or (role == 'phone' and room == 'legacy'):
+        return False
+    session['pairing_room'] = room
+    session['device_role'] = role
+    join_room('phone:' + room if role == 'phone' else room)
+    ready = {'version': 1, 'mode': 'legacy' if room == 'legacy' else 'keyed'}
+    if role == 'phone':
+        ready['role'] = 'phone'
+    emit('routing_ready', ready)
     print('PC client connected')
+
+@socketio.on('open_product_search')
+def open_product_search(data):
+    room = session.get('pairing_room', '')
+    if session.get('device_role') != 'pc' or not room.startswith('key:'):
+        return {'status': 'error', 'error': 'A paired PC connection is required.'}
+    model = data.get('model') if isinstance(data, dict) else None
+    if (not isinstance(model, str) or not 1 <= len(model.strip()) <= 200
+            or any(ord(c) < 32 or ord(c) == 127 for c in model)):
+        return {'status': 'error', 'error': 'Enter a model name of 1-200 characters.'}
+    phone_room = 'phone:' + room
+    phones = len(list(socketio.server.manager.get_participants('/', phone_room)))
+    if not phones:
+        return {'status': 'error', 'error': 'No phone is connected with this pairing key.'}
+    url = 'https://9tems.com/product/search.html?' + urlencode({'banner_action': '', 'keyword': model.strip()})
+    socketio.emit('open_product_search', {'url': url}, to=phone_room)
+    return {'status': 'sent', 'phones': phones}
 
 @socketio.on('disconnect')
 def handle_disconnect(reason=None):

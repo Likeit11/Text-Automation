@@ -4,9 +4,11 @@ import android.Manifest
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
+import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import android.text.Editable
@@ -26,7 +28,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
 
     private val PERMISSIONS_REQUEST_CODE = 100
-    private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.RECEIVE_SMS)
+    private val REQUIRED_PERMISSIONS = if (Build.VERSION.SDK_INT >= 33) {
+        arrayOf(Manifest.permission.RECEIVE_SMS, Manifest.permission.POST_NOTIFICATIONS)
+    } else {
+        arrayOf(Manifest.permission.RECEIVE_SMS)
+    }
+    private val searchStatusListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == "search_connection_status") updateSearchStatus()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,6 +59,7 @@ class MainActivity : AppCompatActivity() {
                     putString("host_address", s.toString())
                     apply()
                 }
+                syncSearchService()
             }
         })
 
@@ -58,6 +68,7 @@ class MainActivity : AppCompatActivity() {
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: Editable?) {
                 sharedPreferences.edit().putString("pairing_key", s.toString()).apply()
+                syncSearchService()
             }
         })
 
@@ -73,6 +84,10 @@ class MainActivity : AppCompatActivity() {
                 startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
             }
             updateBackgroundStatus()
+        }
+
+        binding.allowAutoOpen.setOnClickListener {
+            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
         }
 
         // 테스트 버튼 클릭 리스너
@@ -92,6 +107,37 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         updateBackgroundStatus()
+        getSharedPreferences("settings", Context.MODE_PRIVATE).registerOnSharedPreferenceChangeListener(searchStatusListener)
+        syncSearchService()
+        updateSearchStatus()
+    }
+
+    override fun onPause() {
+        getSharedPreferences("settings", Context.MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(searchStatusListener)
+        super.onPause()
+    }
+
+    private fun syncSearchService() {
+        val preferences = getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val key = preferences.getString("pairing_key", "") ?: ""
+        val host = preferences.getString("host_address", "") ?: ""
+        val validHost = try { SmsApi.serverUrl(host); true } catch (_: IllegalArgumentException) { false }
+        if (validHost && SmsApi.isValidKey(key)) {
+            ContextCompat.startForegroundService(this, Intent(this, ProductSearchService::class.java))
+        } else {
+            stopService(Intent(this, ProductSearchService::class.java))
+        }
+    }
+
+    private fun updateSearchStatus() {
+        val status = getSharedPreferences("settings", Context.MODE_PRIVATE)
+            .getString("search_connection_status", "서버 주소와 연결키를 입력하세요")
+        binding.searchStatus.text = "PC 검색 연결: $status"
+        binding.allowAutoOpen.text = if (Settings.canDrawOverlays(this)) {
+            "자동 열기 허용됨 · 권한 설정"
+        } else {
+            "휴대폰 자동 열기 권한 설정"
+        }
     }
 
     private fun enableSmsReceiver() {
